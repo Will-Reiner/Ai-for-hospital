@@ -21,6 +21,20 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
+# Sidebar com dados de exemplo
+with st.sidebar:
+    st.header("📋 Dados do Banco")
+    if st.button("Ver dados de exemplo"):
+        st.session_state.mostrar_dados = not st.session_state.get("mostrar_dados", False)
+
+    if st.session_state.get("mostrar_dados", False):
+        st.subheader("Pacientes")
+        st.dataframe(execute_query("SELECT * FROM pacientes"), use_container_width=True)
+        st.subheader("Médicos")
+        st.dataframe(execute_query("SELECT * FROM medicos"), use_container_width=True)
+        st.subheader("Consultas")
+        st.dataframe(execute_query("SELECT * FROM consultas"), use_container_width=True)
+
 # Estado do chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -46,17 +60,31 @@ if pergunta := st.chat_input("Faça uma pergunta sobre o banco de dados..."):
         with st.spinner("Pensando..."):
             schema = get_schema()
 
+            # Monta histórico de conversa para contexto
+            historico = ""
+            for msg in st.session_state.messages[:-1]:  # exclui a pergunta atual (já adicionada)
+                if msg["role"] == "user":
+                    historico += f"Usuário: {msg['content']}\n"
+                elif msg["role"] == "assistant":
+                    historico += f"Assistente: {msg['content']}\n"
+
+            contexto_historico = ""
+            if historico:
+                contexto_historico = f"""Histórico da conversa (use como contexto para entender referências como "ele", "ela", "isso", "o mesmo", etc.):
+{historico}
+"""
+
             # Prompt 1: Text-to-SQL
             prompt_sql = f"""Você é um assistente que converte perguntas em SQL.
 Dado o esquema:
 {schema}
 
-Pergunta: {pergunta}
+{contexto_historico}Pergunta atual: {pergunta}
 Retorne APENAS o código SQL, sem markdown, sem explicação."""
 
             try:
                 # st.info("🔄 Enviando pergunta para gerar SQL...")
-                response_sql = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt_sql)
+                response_sql = client.models.generate_content(model="gemini-2.5-flash", contents=prompt_sql)
                 
                 # st.success("✅ Resposta SQL recebida")
                 # with st.expander("🐛 DEBUG: response_sql"):
@@ -79,15 +107,15 @@ Retorne APENAS o código SQL, sem markdown, sem explicação."""
                 time.sleep(2)
 
                 # Prompt 2: Resposta em linguagem natural
-                prompt_resposta = f"""Dado a pergunta: {pergunta}
+                prompt_resposta = f"""{contexto_historico}Dado a pergunta atual: {pergunta}
 E o resultado da consulta SQL: {resultado}
-Forneça uma resposta natural e clara em português."""
+Forneça uma resposta natural e clara em português. Considere o histórico da conversa para dar uma resposta contextualizada."""
 
                 # with st.expander("🐛 DEBUG: prompt_resposta"):
                 #     st.write(prompt_resposta)
 
                 # st.info("🔄 Enviando para gerar resposta em linguagem natural...")
-                response_nl = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt_resposta)
+                response_nl = client.models.generate_content(model="gemini-2.5-flash", contents=prompt_resposta)
                 
                 # st.success("✅ Resposta NL recebida")
                 # with st.expander("🐛 DEBUG: response_nl"):
