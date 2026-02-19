@@ -114,6 +114,19 @@ def execute_query(sql):
     conn = sqlite3.connect(DB_PATH)
     try:
         df = pd.read_sql_query(sql, conn)
+        
+        # Renomeia colunas duplicadas para evitar erro no Streamlit / PyArrow
+        new_cols = []
+        col_counts = {}
+        for col in df.columns:
+            if col not in col_counts:
+                col_counts[col] = 1
+                new_cols.append(col)
+            else:
+                col_counts[col] += 1
+                new_cols.append(f"{col}_{col_counts[col]}")
+        df.columns = new_cols
+        
         return df
     finally:
         conn.close()
