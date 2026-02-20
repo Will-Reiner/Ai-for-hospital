@@ -10,6 +10,19 @@ from database import init_db, get_schema, execute_query
 load_dotenv()
 
 st.set_page_config(page_title="Chat Hospitalar", page_icon="🏥", layout="centered")
+
+# CSS para alinhar o microfone ao campo de input
+st.markdown("""
+<style>
+    /* Alinha o botão do microfone verticalmente ao centro do input */
+    [data-testid="stBottom"] [data-testid="column"]:last-child {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏥 Chat com Banco de Dados Hospitalar")
 
 # Inicializa o banco de dados
@@ -126,7 +139,10 @@ for msg in st.session_state.messages:
 
 # Input fixo no rodapé com microfone ao lado
 with st._bottom:
-    col_mic, col_input = st.columns([0.07, 0.93], vertical_alignment="bottom")
+    col_input, col_mic = st.columns([0.93, 0.07], vertical_alignment="center")
+
+    with col_input:
+        pergunta = st.chat_input("Faça uma pergunta sobre o banco de dados...")
 
     with col_mic:
         audio_bytes = audio_recorder(
@@ -137,9 +153,6 @@ with st._bottom:
             pause_threshold=2.0,
             key="audio_recorder",
         )
-
-    with col_input:
-        pergunta = st.chat_input("Faça uma pergunta sobre o banco de dados...")
 
 # Transcreve áudio
 if audio_bytes:
