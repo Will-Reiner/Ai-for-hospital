@@ -67,7 +67,8 @@ def processar_pergunta(pergunta):
             schema = get_schema()
 
             historico = ""
-            for msg in st.session_state.messages[:-1]:
+            mensagens_recentes = st.session_state.messages[-11:-1]  # últimas 10 mensagens
+            for msg in mensagens_recentes:
                 if msg["role"] == "user":
                     historico += f"Usuário: {msg['content']}\n"
                 elif msg["role"] == "assistant":
@@ -79,31 +80,68 @@ def processar_pergunta(pergunta):
 {historico}
 """
 
-            prompt_sql = f"""Você é um assistente que converte perguntas em SQL.
-Dado o esquema:
+            sistema_sql = f"""Você é um assistente especializado em converter perguntas em consultas SQL para um banco de dados hospitalar SQLite.
+
+ESQUEMA DO BANCO:
 {schema}
 
-{contexto_historico}Pergunta atual: {pergunta}
-Retorne APENAS o código SQL, sem markdown, sem explicação."""
+REGRAS OBRIGATÓRIAS:
+1. Gere APENAS consultas SELECT. NUNCA gere INSERT, UPDATE, DELETE, DROP, ALTER ou qualquer comando que modifique dados.
+2. Retorne APENAS o código SQL puro, sem markdown, sem explicação, sem comentários.
+3. Use JOINs quando a pergunta envolver dados de múltiplas tabelas (ex: nome do paciente + dados da consulta).
+4. Para buscas por nome, use LIKE com '%' para busca parcial (ex: WHERE nome LIKE '%Ana%'). Use COLLATE NOCASE para ignorar maiúsculas/minúsculas.
+5. Datas estão no formato 'YYYY-MM-DD'. Use date('now') para a data de hoje. Use strftime() para extrair mês/ano.
+6. Use aliases claros para colunas de JOINs (ex: pacientes.nome AS paciente, medicos.nome AS medico).
+7. Limite resultados a 50 linhas com LIMIT 50, a menos que a pergunta peça contagem ou agregação.
+8. Para perguntas vagas ou impossíveis de responder com o esquema, retorne: SELECT 'Pergunta não pode ser respondida com os dados disponíveis' AS resposta
+
+VALORES CONHECIDOS:
+- status de consultas: 'agendada', 'realizada'
+- especialidades: Cardiologia, Dermatologia, Ortopedia, Pediatria, Neurologia, Ginecologia, Oftalmologia, Psiquiatria, Urologia, Endocrinologia"""
+
+            mensagem_usuario_sql = f"""{contexto_historico}Pergunta atual: {pergunta}"""
 
             try:
                 response_sql = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt_sql}],
+                    messages=[
+                        {"role": "system", "content": sistema_sql},
+                        {"role": "user", "content": mensagem_usuario_sql},
+                    ],
                 )
                 sql = response_sql.choices[0].message.content.strip()
                 sql = sql.removeprefix("```sql").removeprefix("```").removesuffix("```").strip()
 
+                # Validação de segurança: bloqueia comandos destrutivos
+                sql_upper = sql.upper().strip()
+                palavras_proibidas = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "REPLACE"]
+                if any(sql_upper.startswith(p) for p in palavras_proibidas):
+                    st.warning("A consulta gerada tentou modificar o banco de dados e foi bloqueada por segurança.")
+                    st.session_state.messages.append({"role": "assistant", "content": "Desculpe, só posso realizar consultas de leitura no banco de dados."})
+                    return
+
                 df = execute_query(sql)
                 resultado = df.to_string(index=False) if not df.empty else "Nenhum resultado encontrado."
 
-                prompt_resposta = f"""{contexto_historico}Dado a pergunta atual: {pergunta}
-E o resultado da consulta SQL: {resultado}
-Forneça uma resposta natural e clara em português. Considere o histórico da conversa para dar uma resposta contextualizada."""
+                sistema_resposta = """Você é um assistente de um sistema hospitalar. Sua função é transformar resultados de consultas SQL em respostas naturais e claras em português brasileiro.
+
+REGRAS:
+1. Seja direto e objetivo. Não mencione SQL, banco de dados ou termos técnicos.
+2. Quando houver múltiplos resultados, organize em lista ou formato estruturado.
+3. Formate datas para o padrão brasileiro (DD/MM/AAAA).
+4. Se o resultado for "Nenhum resultado encontrado", diga de forma amigável (ex: "Não encontrei registros para essa busca.").
+5. Considere o histórico da conversa para entender referências como "ele", "ela", "o mesmo".
+6. Não invente dados que não estejam no resultado. Responda apenas com base no que foi retornado."""
+
+                mensagem_usuario_resposta = f"""{contexto_historico}Pergunta do usuário: {pergunta}
+Resultado da consulta: {resultado}"""
 
                 response_nl = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt_resposta}],
+                    messages=[
+                        {"role": "system", "content": sistema_resposta},
+                        {"role": "user", "content": mensagem_usuario_resposta},
+                    ],
                 )
                 resposta = response_nl.choices[0].message.content.strip()
 
