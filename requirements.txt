@@ -4,3 +4,4 @@ pandas
 python-dotenv
 SpeechRecognition
 audio-recorder-streamlit
+plotly
