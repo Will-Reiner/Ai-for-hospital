@@ -288,6 +288,467 @@ def _gerar_html_dashboard(dados):
     return html
 
 
+def _gerar_pdf_completo(medico_nome):
+    """Gera PDF A4 retrato com agenda de hoje, resumo de ontem e financeiro do mês."""
+    from io import BytesIO
+    import datetime as dt
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle,
+        Paragraph, Spacer, HRFlowable,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+    hoje = date.today()
+    ontem = hoje - dt.timedelta(days=1)
+    hoje_str = hoje.isoformat()
+    ontem_str = ontem.isoformat()
+    hoje_br = hoje.strftime("%d/%m/%Y")
+    ontem_br = ontem.strftime("%d/%m/%Y")
+    primeiro_dia = hoje.replace(day=1).isoformat()
+
+    import locale
+    try:
+        locale.setlocale(locale.LC_TIME, "pt_BR.UTF-8")
+    except Exception:
+        pass
+    try:
+        mes_nome = hoje.strftime("%B/%Y")
+    except Exception:
+        mes_nome = hoje.strftime("%m/%Y")
+
+    buffer = BytesIO()
+    W_PAGE, H_PAGE = A4
+    MARGIN = 15 * mm
+    W = W_PAGE - 2 * MARGIN
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=MARGIN,
+        leftMargin=MARGIN,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+    )
+
+    s = getSampleStyleSheet()
+
+    def _ps(name, **kwargs):
+        base = kwargs.pop("parent", s["Normal"])
+        return ParagraphStyle(name, parent=base, **kwargs)
+
+    sT = _ps("sT", parent=s["Normal"], fontSize=18, fontName="Helvetica-Bold",
+              textColor=colors.HexColor("#1a1a2e"), alignment=TA_CENTER, spaceAfter=2)
+    sSub = _ps("sSub", fontSize=9, textColor=colors.HexColor("#666666"),
+                alignment=TA_CENTER, spaceAfter=10)
+    sSec = _ps("sSec", parent=s["Normal"], fontSize=12, fontName="Helvetica-Bold",
+               textColor=colors.white, spaceBefore=12, spaceAfter=6)
+    sMed = _ps("sMed", fontSize=9, textColor=colors.HexColor("#444444"), spaceAfter=6)
+    sNorm = _ps("sNorm", fontSize=8, textColor=colors.HexColor("#333333"))
+    sKL = _ps("sKL", fontSize=7, textColor=colors.HexColor("#666666"), alignment=TA_CENTER)
+    sKV = _ps("sKV", fontSize=15, fontName="Helvetica-Bold",
+               textColor=colors.HexColor("#1a1a2e"), alignment=TA_CENTER)
+    sKVg = _ps("sKVg", fontSize=15, fontName="Helvetica-Bold",
+                textColor=colors.HexColor("#2e7d32"), alignment=TA_CENTER)
+    sKVo = _ps("sKVo", fontSize=15, fontName="Helvetica-Bold",
+                textColor=colors.HexColor("#e65100"), alignment=TA_CENTER)
+    sH3 = _ps("sH3", parent=s["Normal"], fontSize=10, fontName="Helvetica-Bold",
+               textColor=colors.HexColor("#1a1a2e"), spaceBefore=6, spaceAfter=4)
+    sFoot = _ps("sFoot", fontSize=7, textColor=colors.HexColor("#999999"), alignment=TA_CENTER)
+
+    COR_AZUL = colors.HexColor("#1a1a2e")
+    COR_VERDE = colors.HexColor("#2e7d32")
+    COR_AZUL2 = colors.HexColor("#36A2EB")
+    COR_VERDE2 = colors.HexColor("#4CAF50")
+    COR_ROSA = colors.HexColor("#FF6384")
+    COR_ROXO = colors.HexColor("#9966FF")
+    COR_LISTRA = colors.HexColor("#f8f9fa")
+    COR_BORDA = colors.HexColor("#dee2e6")
+    COR_FUNDO_KPI = colors.HexColor("#f0f2f5")
+
+    BASE_TABLE = [
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWPADDING", (0, 0), (-1, -1), 5),
+        ("GRID", (0, 0), (-1, -1), 0.4, COR_BORDA),
+    ]
+
+    def _header_style(cor):
+        return [
+            ("BACKGROUND", (0, 0), (-1, 0), cor),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, COR_LISTRA]),
+        ]
+
+    def _section_bar(titulo, cor):
+        """Retorna uma Table de uma célula que parece um cabeçalho colorido."""
+        t = Table([[Paragraph(titulo, sSec)]], colWidths=[W])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), cor),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return t
+
+    def _kpi_table(labels, values, value_styles=None, n_cols=None):
+        if n_cols is None:
+            n_cols = len(labels)
+        if value_styles is None:
+            value_styles = [sKV] * n_cols
+        row_l = [Paragraph(l, sKL) for l in labels]
+        row_v = [Paragraph(v, value_styles[i]) for i, v in enumerate(values)]
+        t = Table([row_l, row_v], colWidths=[W / n_cols] * n_cols)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COR_FUNDO_KPI),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("ROWPADDING", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        return t
+
+    els = []
+
+    # ── Cabeçalho ──────────────────────────────────────────────
+    els.append(Paragraph("Relatorio Hospitalar Diario", sT))
+    els.append(Paragraph(f"Gerado em {hoje_br}", sSub))
+    els.append(HRFlowable(width="100%", thickness=2, color=COR_AZUL))
+    els.append(Spacer(1, 5 * mm))
+
+    # ══════════════════════════════════════════════════════
+    # SECAO 1 — AGENDA DE HOJE
+    # ══════════════════════════════════════════════════════
+    els.append(_section_bar(f"AGENDA DE HOJE  —  {hoje_br}", COR_AZUL))
+    els.append(Spacer(1, 2 * mm))
+    els.append(Paragraph(f"Medico: {medico_nome}", sMed))
+
+    df_ag = execute_query_raw("""
+        SELECT c.hora_consulta, p.nome AS paciente, p.telefone, c.status, c.diagnostico
+        FROM consultas c
+        JOIN pacientes p ON c.paciente_id = p.id
+        JOIN medicos m ON c.medico_id = m.id
+        WHERE m.nome = ? AND c.data_consulta = ?
+        ORDER BY c.hora_consulta
+    """, (medico_nome, hoje_str))
+
+    if df_ag.empty:
+        els.append(Paragraph(f"Nenhuma consulta para {medico_nome} hoje.", sNorm))
+    else:
+        real_ag = int((df_ag["status"] == "realizada").sum())
+        agend_ag = int((df_ag["status"] == "agendada").sum())
+        els.append(_kpi_table(
+            ["Total de Consultas", "Realizadas", "Agendadas"],
+            [str(len(df_ag)), str(real_ag), str(agend_ag)],
+        ))
+        els.append(Spacer(1, 3 * mm))
+
+        rows_ag = [["Horario", "Paciente", "Telefone", "Status"]]
+        for _, r in df_ag.iterrows():
+            rows_ag.append([
+                r["hora_consulta"],
+                str(r["paciente"])[:28],
+                r["telefone"] or "-",
+                r["status"].capitalize(),
+            ])
+        t_ag = Table(rows_ag, colWidths=[W * 0.12, W * 0.40, W * 0.28, W * 0.20], repeatRows=1)
+        t_ag.setStyle(TableStyle(BASE_TABLE + _header_style(COR_AZUL)))
+        els.append(t_ag)
+
+    els.append(Spacer(1, 5 * mm))
+
+    # ══════════════════════════════════════════════════════
+    # SECAO 2 — RESUMO DE ONTEM
+    # ══════════════════════════════════════════════════════
+    els.append(_section_bar(f"RESUMO DE ONTEM  —  {ontem_br}", colors.HexColor("#37474f")))
+    els.append(Spacer(1, 2 * mm))
+    els.append(Paragraph(f"Medico: {medico_nome}", sMed))
+
+    df_on = execute_query_raw("""
+        SELECT c.hora_consulta, p.nome AS paciente, c.diagnostico,
+               COALESCE(pr.nome, '-') AS procedimento,
+               COALESCE(co.valor_total, 0) AS valor_total,
+               COALESCE(co.valor_pago, 0) AS valor_pago,
+               COALESCE(co.status, '-') AS status_conta
+        FROM consultas c
+        JOIN pacientes p ON c.paciente_id = p.id
+        JOIN medicos m ON c.medico_id = m.id
+        LEFT JOIN contas co ON co.consulta_id = c.id
+        LEFT JOIN procedimentos pr ON co.procedimento_id = pr.id
+        WHERE m.nome = ? AND c.data_consulta = ?
+        ORDER BY c.hora_consulta
+    """, (medico_nome, ontem_str))
+
+    if df_on.empty:
+        els.append(Paragraph(f"Nenhuma consulta para {medico_nome} ontem.", sNorm))
+    else:
+        fat_on = float(df_on["valor_pago"].sum())
+        tot_on = float(df_on["valor_total"].sum())
+        areceber_on = tot_on - fat_on
+        els.append(_kpi_table(
+            ["Consultas", "Faturado", "A Receber"],
+            [str(len(df_on)), _formatar_brl(fat_on), _formatar_brl(areceber_on)],
+            value_styles=[sKV, sKVg, sKVo],
+        ))
+        els.append(Spacer(1, 3 * mm))
+
+        rows_on = [["Horario", "Paciente", "Diagnostico", "Procedimento", "Valor"]]
+        for _, r in df_on.iterrows():
+            val = _formatar_brl(float(r["valor_pago"])) if r["valor_pago"] > 0 else "-"
+            rows_on.append([
+                r["hora_consulta"],
+                str(r["paciente"])[:22],
+                str(r["diagnostico"] or "-")[:24],
+                str(r["procedimento"] or "-")[:20],
+                val,
+            ])
+        t_on = Table(rows_on, colWidths=[W * 0.10, W * 0.24, W * 0.27, W * 0.24, W * 0.15], repeatRows=1)
+        t_on.setStyle(TableStyle(BASE_TABLE + _header_style(colors.HexColor("#37474f"))))
+        t_on.setStyle(TableStyle(BASE_TABLE + _header_style(colors.HexColor("#37474f")) + [
+            ("ALIGN", (-1, 1), (-1, -1), "RIGHT"),
+        ]))
+        els.append(t_on)
+
+    els.append(Spacer(1, 5 * mm))
+
+    # ══════════════════════════════════════════════════════
+    # SECAO 3 — FINANCEIRO DO MES
+    # ══════════════════════════════════════════════════════
+    els.append(_section_bar(f"FINANCEIRO DO MES  —  {mes_nome.upper()}", COR_VERDE))
+    els.append(Spacer(1, 2 * mm))
+
+    kpis_fin = execute_query_raw("""
+        SELECT
+            COALESCE(SUM(valor_pago), 0)            AS receita_total,
+            COALESCE(SUM(valor_total), 0)           AS valor_bruto,
+            COUNT(*)                                 AS total_contas,
+            COUNT(CASE WHEN status='pago' THEN 1 END)     AS contas_pagas,
+            COUNT(CASE WHEN status='pendente' THEN 1 END) AS contas_pend,
+            COUNT(CASE WHEN status='parcial' THEN 1 END)  AS contas_parc,
+            COUNT(DISTINCT consulta_id)              AS pacientes_atend,
+            COALESCE(SUM(CASE WHEN status IN ('pendente','parcial')
+                THEN valor_total - valor_pago ELSE 0 END), 0) AS valor_pendente
+        FROM contas
+        WHERE data_emissao BETWEEN ? AND ?
+    """, (primeiro_dia, hoje_str))
+
+    if not kpis_fin.empty:
+        k = kpis_fin.iloc[0]
+        rec = float(k["receita_total"])
+        bruto = float(k["valor_bruto"])
+        tot_c = int(k["total_contas"])
+        pagas = int(k["contas_pagas"])
+        pac = int(k["pacientes_atend"])
+        pend = float(k["valor_pendente"])
+        ticket = rec / pac if pac > 0 else 0.0
+        taxa_adim = (pagas / tot_c * 100) if tot_c > 0 else 0.0
+        media_dia = rec / hoje.day if hoje.day > 0 else 0.0
+        desconto_total = bruto - rec
+
+        # KPIs principais (2 colunas x 2 linhas)
+        kpi2_data = [
+            [Paragraph("Receita Total do Mes", sKL), Paragraph("Valor Pendente", sKL)],
+            [Paragraph(_formatar_brl(rec), sKVg), Paragraph(_formatar_brl(pend), sKVo)],
+            [Paragraph("Pacientes Atendidos", sKL), Paragraph("Contas Pagas", sKL)],
+            [Paragraph(str(pac), sKV), Paragraph(str(pagas), sKV)],
+        ]
+        t_kpi2 = Table(kpi2_data, colWidths=[W / 2, W / 2])
+        t_kpi2.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COR_FUNDO_KPI),
+            ("BACKGROUND", (0, 2), (-1, 2), COR_FUNDO_KPI),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+            ("BACKGROUND", (0, 3), (-1, 3), colors.white),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("ROWPADDING", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        els.append(t_kpi2)
+        els.append(Spacer(1, 3 * mm))
+
+        # KPIs secundários (3 colunas)
+        els.append(_kpi_table(
+            ["Ticket Medio", "Taxa Adimplencia", "Media Diaria de Receita"],
+            [_formatar_brl(ticket),
+             f"{taxa_adim:.1f}%",
+             _formatar_brl(media_dia)],
+            value_styles=[sKV,
+                          sKVg if taxa_adim >= 60 else sKVo,
+                          sKV],
+        ))
+        els.append(Spacer(1, 3 * mm))
+
+        # KPIs terciários
+        els.append(_kpi_table(
+            ["Total de Contas", "Contas Pendentes", "Desconto por Convenio"],
+            [str(tot_c),
+             str(int(k["contas_pend"])),
+             _formatar_brl(desconto_total)],
+            value_styles=[sKV,
+                          sKVo if int(k["contas_pend"]) > 0 else sKV,
+                          sKV],
+        ))
+        els.append(Spacer(1, 4 * mm))
+
+    # -- Top Especialidades --
+    els.append(Paragraph("Top Especialidades por Faturamento", sH3))
+    df_esp = execute_query_raw("""
+        SELECT m.especialidade,
+               COUNT(DISTINCT co.consulta_id) AS consultas,
+               SUM(co.valor_pago) AS total
+        FROM contas co
+        JOIN consultas c ON co.consulta_id = c.id
+        JOIN medicos m ON c.medico_id = m.id
+        WHERE co.data_emissao BETWEEN ? AND ? AND co.valor_pago > 0
+        GROUP BY m.especialidade
+        ORDER BY total DESC
+        LIMIT 8
+    """, (primeiro_dia, hoje_str))
+
+    if not df_esp.empty:
+        tot_esp = df_esp["total"].sum()
+        rows_esp = [["Especialidade", "Consultas", "Faturamento", "% Total"]]
+        for _, r in df_esp.iterrows():
+            pct = float(r["total"]) / tot_esp * 100 if tot_esp > 0 else 0
+            rows_esp.append([r["especialidade"], str(int(r["consultas"])),
+                             _formatar_brl(float(r["total"])), f"{pct:.1f}%"])
+        t_esp = Table(rows_esp, colWidths=[W * 0.44, W * 0.16, W * 0.25, W * 0.15], repeatRows=1)
+        t_esp.setStyle(TableStyle(BASE_TABLE + _header_style(COR_AZUL2) + [
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ]))
+        els.append(t_esp)
+        els.append(Spacer(1, 4 * mm))
+
+    # -- Top 5 Médicos --
+    els.append(Paragraph("Top 5 Medicos por Faturamento", sH3))
+    df_med = execute_query_raw("""
+        SELECT m.nome, m.especialidade,
+               COUNT(DISTINCT co.consulta_id) AS consultas,
+               SUM(co.valor_pago) AS total
+        FROM contas co
+        JOIN consultas c ON co.consulta_id = c.id
+        JOIN medicos m ON c.medico_id = m.id
+        WHERE co.data_emissao BETWEEN ? AND ? AND co.valor_pago > 0
+        GROUP BY m.nome, m.especialidade
+        ORDER BY total DESC
+        LIMIT 5
+    """, (primeiro_dia, hoje_str))
+
+    if not df_med.empty:
+        rows_med = [["Medico", "Especialidade", "Qtd", "Faturamento"]]
+        for _, r in df_med.iterrows():
+            rows_med.append([str(r["nome"])[:28], r["especialidade"],
+                             str(int(r["consultas"])), _formatar_brl(float(r["total"]))])
+        t_med = Table(rows_med, colWidths=[W * 0.34, W * 0.31, W * 0.11, W * 0.24], repeatRows=1)
+        t_med.setStyle(TableStyle(BASE_TABLE + _header_style(COR_VERDE2) + [
+            ("ALIGN", (2, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (3, 1), (3, -1), "RIGHT"),
+        ]))
+        els.append(t_med)
+        els.append(Spacer(1, 4 * mm))
+
+    # -- Formas de Pagamento --
+    els.append(Paragraph("Receita por Forma de Pagamento", sH3))
+    df_fp = execute_query_raw("""
+        SELECT
+            CASE forma_pagamento
+                WHEN 'cartao_credito' THEN 'Cartao Credito'
+                WHEN 'cartao_debito'  THEN 'Cartao Debito'
+                WHEN 'pix'            THEN 'PIX'
+                WHEN 'dinheiro'       THEN 'Dinheiro'
+                WHEN 'convenio'       THEN 'Convenio'
+                ELSE forma_pagamento
+            END AS forma,
+            COUNT(*) AS qtd,
+            SUM(valor) AS total
+        FROM pagamentos
+        WHERE data_pagamento BETWEEN ? AND ?
+        GROUP BY forma_pagamento
+        ORDER BY total DESC
+    """, (primeiro_dia, hoje_str))
+
+    if not df_fp.empty:
+        tot_fp = df_fp["total"].sum()
+        rows_fp = [["Forma de Pagamento", "Qtd", "Total", "% do Total"]]
+        for _, r in df_fp.iterrows():
+            pct = float(r["total"]) / tot_fp * 100 if tot_fp > 0 else 0
+            rows_fp.append([r["forma"], str(int(r["qtd"])),
+                            _formatar_brl(float(r["total"])), f"{pct:.1f}%"])
+        t_fp = Table(rows_fp, colWidths=[W * 0.37, W * 0.13, W * 0.30, W * 0.20], repeatRows=1)
+        t_fp.setStyle(TableStyle(BASE_TABLE + _header_style(COR_ROSA) + [
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ]))
+        els.append(t_fp)
+        els.append(Spacer(1, 4 * mm))
+
+    # -- Convênios --
+    els.append(Paragraph("Atendimentos por Convenio", sH3))
+    df_conv = execute_query_raw("""
+        SELECT COALESCE(cv.nome, 'Particular') AS convenio,
+               COUNT(*) AS qtd,
+               SUM(co.valor_pago) AS total
+        FROM contas co
+        JOIN consultas c ON co.consulta_id = c.id
+        LEFT JOIN convenios cv ON co.convenio_id = cv.id
+        WHERE co.data_emissao BETWEEN ? AND ?
+        GROUP BY cv.nome
+        ORDER BY total DESC
+    """, (primeiro_dia, hoje_str))
+
+    if not df_conv.empty:
+        rows_conv = [["Convenio", "Atendimentos", "Total Recebido"]]
+        for _, r in df_conv.iterrows():
+            rows_conv.append([r["convenio"], str(int(r["qtd"])), _formatar_brl(float(r["total"]))])
+        t_conv = Table(rows_conv, colWidths=[W * 0.44, W * 0.28, W * 0.28], repeatRows=1)
+        t_conv.setStyle(TableStyle(BASE_TABLE + _header_style(COR_ROXO) + [
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ]))
+        els.append(t_conv)
+
+    # -- Diagnósticos mais frequentes no mês --
+    els.append(Spacer(1, 4 * mm))
+    els.append(Paragraph("Diagnosticos Mais Frequentes no Mes", sH3))
+    df_diag = execute_query_raw("""
+        SELECT c.diagnostico, COUNT(*) AS qtd
+        FROM consultas c
+        WHERE c.data_consulta BETWEEN ? AND ? AND c.diagnostico IS NOT NULL
+        GROUP BY c.diagnostico
+        ORDER BY qtd DESC
+        LIMIT 8
+    """, (primeiro_dia, hoje_str))
+
+    if not df_diag.empty:
+        rows_diag = [["Diagnostico", "Ocorrencias"]]
+        for _, r in df_diag.iterrows():
+            rows_diag.append([str(r["diagnostico"]), str(int(r["qtd"]))])
+        t_diag = Table(rows_diag, colWidths=[W * 0.75, W * 0.25], repeatRows=1)
+        t_diag.setStyle(TableStyle(BASE_TABLE + _header_style(colors.HexColor("#546e7a")) + [
+            ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ]))
+        els.append(t_diag)
+
+    # ── Rodapé ─────────────────────────────────────────────
+    els.append(Spacer(1, 8 * mm))
+    els.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#cccccc")))
+    els.append(Spacer(1, 2 * mm))
+    els.append(Paragraph(
+        f"Relatorio gerado automaticamente em {hoje_br} — Sistema Hospitalar",
+        sFoot,
+    ))
+
+    doc.build(els)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("📊 Consultas Rápidas")
@@ -302,20 +763,8 @@ with st.sidebar:
     if lista_medicos:
         medico_selecionado = st.selectbox("Médico", lista_medicos, key="medico_select")
 
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            btn_agenda = st.button("📋 Agenda Hoje", use_container_width=True)
-        with col_btn2:
-            btn_resumo = st.button("📊 Resumo Ontem", use_container_width=True)
-
-        if btn_agenda:
-            st.session_state.acao_sidebar = ("agenda_hoje", medico_selecionado)
-        if btn_resumo:
-            st.session_state.acao_sidebar = ("resumo_ontem", medico_selecionado)
-
-    st.button("💰 Financeiro do Mês", key="btn_financeiro", use_container_width=True)
-    if st.session_state.get("btn_financeiro"):
-        st.session_state.acao_sidebar = ("financeiro", None)
+        if st.button("📄 Gerar Relatório PDF", use_container_width=True, type="primary"):
+            st.session_state.acao_sidebar = ("gerar_pdf", medico_selecionado)
 
     st.divider()
 
@@ -333,43 +782,20 @@ with st.sidebar:
 if "acao_sidebar" in st.session_state:
     acao, param = st.session_state.pop("acao_sidebar")
 
-    if acao == "agenda_hoje":
-        texto = _gerar_agenda_hoje(param)
-        st.session_state.messages.append({"role": "user", "content": f"Agenda de {param} hoje"})
-        st.session_state.messages.append({"role": "assistant", "content": texto, "type": "doctor_report"})
-        st.rerun()
-
-    elif acao == "resumo_ontem":
-        texto = _gerar_resumo_ontem(param)
-        st.session_state.messages.append({"role": "user", "content": f"Resumo de {param} ontem"})
-        st.session_state.messages.append({"role": "assistant", "content": texto, "type": "doctor_report"})
-        st.rerun()
-
-    elif acao == "financeiro":
-        dados = _gerar_dashboard_financeiro()
-        html_content = _gerar_html_dashboard(dados)
-        kpis = dados["kpis"]
-        receita = _formatar_brl(float(kpis['receita_total'])).replace("$", "\\$") if kpis is not None else "R\\$ 0,00"
-        pagas = int(kpis["contas_pagas"]) if kpis is not None else 0
-        pac = int(kpis["pacientes_atendidos"]) if kpis is not None else 0
-        pendente = _formatar_brl(float(kpis['valor_pendente'])).replace("$", "\\$") if kpis is not None else "R\\$ 0,00"
-
-        resumo = (
-            f"📈 **Dashboard Financeiro do Mês**\n\n"
-            f"💰 Receita Total: {receita}  \n"
-            f"✅ Contas Pagas: {pagas}  \n"
-            f"👥 Pacientes Atendidos: {pac}  \n"
-            f"⏳ Valor Pendente: {pendente}"
-        )
-
-        st.session_state.messages.append({"role": "user", "content": "Financeiro do mês"})
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": resumo,
-            "type": "financial",
-            "html_dashboard": html_content,
-        })
-        st.rerun()
+    if acao == "gerar_pdf":
+        with st.spinner("Gerando PDF..."):
+            try:
+                pdf_bytes = _gerar_pdf_completo(param)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"📄 **Relatório PDF gerado** para **{param}** — {date.today().strftime('%d/%m/%Y')}\n\nContém: Agenda de Hoje · Resumo de Ontem · Financeiro do Mês",
+                    "type": "pdf_report",
+                    "pdf_bytes": pdf_bytes,
+                    "pdf_filename": f"relatorio_{date.today().isoformat()}.pdf",
+                })
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao gerar PDF: {e}")
 
 
 def processar_pergunta(pergunta):
@@ -500,6 +926,15 @@ for msg in st.session_state.messages:
                 file_name="dashboard_financeiro.html",
                 mime="text/html",
                 key=f"dl_dashboard_{id(msg)}",
+            )
+        elif msg_type == "pdf_report" and "pdf_bytes" in msg:
+            st.markdown(msg["content"])
+            st.download_button(
+                label="⬇️ Baixar Relatório PDF",
+                data=msg["pdf_bytes"],
+                file_name=msg.get("pdf_filename", "relatorio.pdf"),
+                mime="application/pdf",
+                key=f"dl_pdf_{id(msg)}",
             )
         else:
             st.markdown(msg["content"])
